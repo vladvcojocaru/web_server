@@ -58,14 +58,20 @@ int main() {
         if ((*client_fd = accept(server_fd, (struct sockaddr *)&client_addr,
                                  &client_addr_len)) < 0) {
             perror("accept failed");
+            free(client_fd);
             continue;
         }
+
         pthread_t thread_id;
-        pthread_create(&thread_id, NULL, handle_client, (void *)client_fd);
+        if(pthread_create(&thread_id, NULL, handle_client, (void *)client_fd) != 0){
+            perror("pthread_create failed");
+            close(*client_fd);
+            free(client_fd);
+            continue;
+        }
         pthread_detach(thread_id);
     }
 
-    // Create thread to handle client request
 
     return 0;
 }
@@ -84,7 +90,7 @@ void *handle_client(void *arg) {
         free(buffer);
         return NULL;
     } else if (bytes_received < 0){
-        perror("recv failed");
+        perror("Failed to receive client request");
         close(client_fd);
         free(arg);
         free(buffer);
@@ -103,11 +109,27 @@ void *handle_client(void *arg) {
     }
 
     char *file_name = strtok(NULL, " ");
+    if (!file_name){
+        perror("Malformed HTTP request: missing file name");
+        send_error_message(client_fd);
+        close(client_fd);
+        free(arg);
+        free(buffer);
+        return NULL;
+    }
+
     char file_path[BUFFER_SIZE];
     if (strcmp(file_name, "/") == 0){
         snprintf(file_path, sizeof(file_path), "./www/index.html");
     } else {
-        snprintf(file_path, sizeof(file_path), "./www%s", file_name);
+        if(snprintf(file_path, sizeof(file_path), "./www%s", file_name) >= sizeof(file_path)){
+            fprintf(stderr, "File path too long\n");
+            send_error_message(client_fd);
+            close(client_fd);
+            free(arg);
+            free(buffer);
+            return NULL;
+        }
     }
 
     if (access(file_path, F_OK) == 0){
@@ -126,7 +148,7 @@ void send_content(int client_fd, char *file_path){
     FILE *file = fopen(file_path, "r");
     if (file == NULL){
         perror("Failed to open file");
-        send_error_message2(client_fd);
+        send_error_message(client_fd);
         return;
     }
 
@@ -149,7 +171,7 @@ void send_error_message(int client_fd){
     char *response_header =  "HTTP/1.1 404 Not Found\r\n"
                 "Content-Type: text/html\r\n"
                 "\r\n";
-    char *error_body = "<html><body><h1>404 Not Found ai</h1></body></html>";
+    char *error_body = "<html><body><h1>404 Not Found</h1></body></html>";
 
     send(client_fd, response_header, strlen(response_header), 0);
     send(client_fd, error_body, strlen(error_body), 0);
