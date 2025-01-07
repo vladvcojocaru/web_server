@@ -1,6 +1,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <pthread.h>
+#include <regex.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -8,7 +9,6 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include <regex.h>
 
 #define PORT 8080
 #define BUFFER_SIZE 1024
@@ -50,7 +50,7 @@ int main() {
         socklen_t client_addr_len = sizeof(client_addr);
         int *client_fd = malloc(sizeof(int));
 
-        if (!client_fd){
+        if (!client_fd) {
             perror("Memory allocation failed");
             continue;
         }
@@ -63,7 +63,8 @@ int main() {
         }
 
         pthread_t thread_id;
-        if(pthread_create(&thread_id, NULL, handle_client, (void *)client_fd) != 0){
+        if (pthread_create(&thread_id, NULL, handle_client,
+                           (void *)client_fd) != 0) {
             perror("pthread_create failed");
             close(*client_fd);
             free(client_fd);
@@ -71,7 +72,6 @@ int main() {
         }
         pthread_detach(thread_id);
     }
-
 
     return 0;
 }
@@ -83,13 +83,13 @@ void *handle_client(void *arg) {
     // receive request data from client and store into buffer
     ssize_t bytes_received = recv(client_fd, buffer, BUFFER_SIZE, 0);
 
-    if(bytes_received == 0){
+    if (bytes_received == 0) {
         printf("client disconnected...\n");
         close(client_fd);
         free(arg);
         free(buffer);
         return NULL;
-    } else if (bytes_received < 0){
+    } else if (bytes_received < 0) {
         perror("Failed to receive client request");
         close(client_fd);
         free(arg);
@@ -100,7 +100,7 @@ void *handle_client(void *arg) {
     printf("request:\n%s", buffer);
 
     char *request = strtok(buffer, " ");
-    if(strcmp(request,"GET") != 0){
+    if (strcmp(request, "GET") != 0) {
         perror("Must have a GET request");
         close(client_fd);
         free(arg);
@@ -109,7 +109,7 @@ void *handle_client(void *arg) {
     }
 
     char *file_name = strtok(NULL, " ");
-    if (!file_name){
+    if (!file_name) {
         perror("Malformed HTTP request: missing file name");
         send_error_message(client_fd);
         close(client_fd);
@@ -119,10 +119,11 @@ void *handle_client(void *arg) {
     }
 
     char file_path[BUFFER_SIZE];
-    if (strcmp(file_name, "/") == 0){
+    if (strcmp(file_name, "/") == 0) {
         snprintf(file_path, sizeof(file_path), "./www/index.html");
     } else {
-        if(snprintf(file_path, sizeof(file_path), "./www%s", file_name) >= sizeof(file_path)){
+        if (snprintf(file_path, sizeof(file_path), "./www%s", file_name) >=
+            sizeof(file_path)) {
             fprintf(stderr, "File path too long\n");
             send_error_message(client_fd);
             close(client_fd);
@@ -132,9 +133,9 @@ void *handle_client(void *arg) {
         }
     }
 
-    if (access(file_path, F_OK) == 0){
+    if (access(file_path, F_OK) == 0) {
         send_content(client_fd, file_path);
-    } else{
+    } else {
         send_error_message(client_fd);
     }
 
@@ -144,33 +145,32 @@ void *handle_client(void *arg) {
     return NULL;
 }
 
-void send_content(int client_fd, char *file_path){
+void send_content(int client_fd, char *file_path) {
     FILE *file = fopen(file_path, "r");
-    if (file == NULL){
+    if (file == NULL) {
         perror("Failed to open file");
         send_error_message(client_fd);
         return;
     }
 
-    char *response_header =  "HTTP/1.1 200 OK\r\n"
-                "Content-Type: text/html\r\n"
-                "\r\n";
+    char *response_header = "HTTP/1.1 200 OK\r\n"
+                            "Content-Type: text/html\r\n"
+                            "\r\n";
 
     send(client_fd, response_header, strlen(response_header), 0);
 
     char file_buffer[BUFFER_SIZE];
-    while (fgets(file_buffer, sizeof(file_buffer), file)){
+    while (fgets(file_buffer, sizeof(file_buffer), file)) {
         send(client_fd, file_buffer, strlen(file_buffer), 0);
     }
 
     fclose(file);
 }
 
-
-void send_error_message(int client_fd){
-    char *response_header =  "HTTP/1.1 404 Not Found\r\n"
-                "Content-Type: text/html\r\n"
-                "\r\n";
+void send_error_message(int client_fd) {
+    char *response_header = "HTTP/1.1 404 Not Found\r\n"
+                            "Content-Type: text/html\r\n"
+                            "\r\n";
     char *error_body = "<html><body><h1>404 Not Found</h1></body></html>";
 
     send(client_fd, response_header, strlen(response_header), 0);
