@@ -14,6 +14,8 @@
 #define BUFFER_SIZE 1024
 
 void *handle_client(void *arg);
+void send_error_message(int client_fd);
+void send_content(int client_fd, char *file_path);
 
 int main() {
     int server_fd;
@@ -48,7 +50,12 @@ int main() {
         socklen_t client_addr_len = sizeof(client_addr);
         int *client_fd = malloc(sizeof(int));
 
-        if ((*client_fd = accept(server_fd, (struct sockaddr_in *)&client_addr,
+        if (!client_fd){
+            perror("Memory allocation failed");
+            continue;
+        }
+
+        if ((*client_fd = accept(server_fd, (struct sockaddr *)&client_addr,
                                  &client_addr_len)) < 0) {
             perror("accept failed");
             continue;
@@ -84,4 +91,66 @@ void *handle_client(void *arg) {
         return NULL;
     }
 
+    printf("request:\n%s", buffer);
+
+    char *request = strtok(buffer, " ");
+    if(strcmp(request,"GET") != 0){
+        perror("Must have a GET request");
+        close(client_fd);
+        free(arg);
+        free(buffer);
+        return NULL;
+    }
+
+    char *file_name = strtok(NULL, " ");
+    char file_path[BUFFER_SIZE];
+    if (strcmp(file_name, "/") == 0){
+        snprintf(file_path, sizeof(file_path), "./www/index.html");
+    } else {
+        snprintf(file_path, sizeof(file_path), "./www%s", file_name);
+    }
+
+    if (access(file_path, F_OK) == 0){
+        send_content(client_fd, file_path);
+    } else{
+        send_error_message(client_fd);
+    }
+
+    close(client_fd);
+    free(arg);
+    free(buffer);
+    return NULL;
+}
+
+void send_content(int client_fd, char *file_path){
+    FILE *file = fopen(file_path, "r");
+    if (file == NULL){
+        perror("Failed to open file");
+        send_error_message2(client_fd);
+        return;
+    }
+
+    char *response_header =  "HTTP/1.1 200 OK\r\n"
+                "Content-Type: text/html\r\n"
+                "\r\n";
+
+    send(client_fd, response_header, strlen(response_header), 0);
+
+    char file_buffer[BUFFER_SIZE];
+    while (fgets(file_buffer, sizeof(file_buffer), file)){
+        send(client_fd, file_buffer, strlen(file_buffer), 0);
+    }
+
+    fclose(file);
+}
+
+
+void send_error_message(int client_fd){
+    char *response_header =  "HTTP/1.1 404 Not Found\r\n"
+                "Content-Type: text/html\r\n"
+                "\r\n";
+    char *error_body = "<html><body><h1>404 Not Found ai</h1></body></html>";
+
+    send(client_fd, response_header, strlen(response_header), 0);
+    send(client_fd, error_body, strlen(error_body), 0);
 }
