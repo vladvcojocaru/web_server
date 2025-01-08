@@ -17,7 +17,8 @@
 #define PORT 8080
 #define BUFFER_SIZE 1024
 
-bool ends_with(char *main_str, char *ending);
+bool ends_with(const char *main_str, char *ending);
+const char *get_mime_type(const char* file_path);
 void *handle_client(void *arg);
 void file_not_found_error(int client_fd);
 void send_file(int client_fd, char *file_path);

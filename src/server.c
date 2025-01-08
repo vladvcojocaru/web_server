@@ -145,24 +145,29 @@ void send_file(int client_fd, char *file_path){
     }
 
     // Create and send response headers
-    char *response_header;
-    if (ends_with(file_path, ".html")){
-        response_header = "HTTP/1.1 200 OK\r\n"
-            "Content-Type: text/html\r\n"
-            "\r\n";
-    } else if (ends_with(file_path, ".css")){
-        response_header = "HTTP/1.1 200 OK\r\n"
-            "Content-Type: text/css\r\n"
-            "\r\n";
-    } else if (ends_with(file_path, ".js")){
-        response_header = "HTTP/1.1 200 OK\r\n"
-            "Content-Type: application/javascript\r\n"
-            "\r\n";
-    } else {
-        unsupported_media_error(client_fd);
-        fclose(file);
-        return;
-    }
+    // char *response_header;
+    // if (ends_with(file_path, ".html")){
+    //     response_header = "HTTP/1.1 200 OK\r\n"
+    //         "Content-Type: text/html\r\n"
+    //         "\r\n";
+    // } else if (ends_with(file_path, ".css")){
+    //     response_header = "HTTP/1.1 200 OK\r\n"
+    //         "Content-Type: text/css\r\n"
+    //         "\r\n";
+    // } else if (ends_with(file_path, ".js")){
+    //     response_header = "HTTP/1.1 200 OK\r\n"
+    //         "Content-Type: application/javascript\r\n"
+    //         "\r\n";
+    // } else {
+    //     unsupported_media_error(client_fd);
+    //     fclose(file);
+    //     return;
+    // }
+
+    char response_header[BUFFER_SIZE];
+    snprintf(response_header, sizeof(response_header), "HTTP/1.1 200 OK\r\n"
+                "Content-Type: %s\r\n"
+                "\r\n", get_mime_type(file_path));
 
     // Send file contents
     send(client_fd, response_header, strlen(response_header), 0);
@@ -174,6 +179,17 @@ void send_file(int client_fd, char *file_path){
     fclose(file);
 }
 
+const char *get_mime_type(const char *file_path){
+    if (ends_with(file_path, ".html")) return "text/html";
+    if (ends_with(file_path, ".css")) return "text/css";
+    if (ends_with(file_path, ".js")) return "application/javascript";
+    if (ends_with(file_path, ".jpg") || ends_with(file_path, ".jpeg")) return "image/jpeg";
+    if (ends_with(file_path, ".png")) return "image/png";
+    if (ends_with(file_path, ".json")) return "application/json";
+    if (ends_with(file_path, ".txt")) return "text/plain";
+    // Add more cases as needed
+    return "application/octet-stream"; // Default for unknown types
+}
 
 void unsupported_media_error(int client_fd) {
     char *response_header = "HTTP/1.1 415 Unsupported Media Type\r\n"
@@ -195,7 +211,7 @@ void file_not_found_error(int client_fd) {
     send(client_fd, error_body, strlen(error_body), 0);
 }
 
-bool ends_with(char *main_str, char *ending){
+bool ends_with(const char *main_str, char *ending){
     size_t main_len = strlen(main_str);
     size_t ending_len = strlen(ending);
 
