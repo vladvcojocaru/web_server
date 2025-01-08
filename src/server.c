@@ -1,29 +1,10 @@
-#include <arpa/inet.h>
-#include <stdbool.h>
-#include <netinet/in.h>
-#include <pthread.h>
-#include <regex.h>
+#include "server.h"
+#include <signal.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <unistd.h>
 
-#define PORT 8080
-#define BUFFER_SIZE 1024
-
-void *handle_client(void *arg);
-bool ends_with(char *main_str, char *ending);
-void send_error_message(int client_fd);
-void send_file(int client_fd, char *file_path);
-void send_html(int client_fd, char *file_path, FILE *file);
-void send_css(int client_fd, char *file_path);
-void send_js(int client_fd, char *file_path);
+int server_fd;
 
 int main() {
-    int server_fd;
     struct sockaddr_in server_addr;
 
     // Create server socket
@@ -31,6 +12,7 @@ int main() {
         perror("socket failes");
         exit(1);
     }
+    signal(SIGINT, handle_signal);
 
     // Configure socket
     server_addr.sin_family = AF_INET;
@@ -103,7 +85,7 @@ void *handle_client(void *arg) {
 
     char *method = strtok(buffer, " ");
     if (strcmp(method, "GET") != 0) {
-        perror("Must have a GET request");
+        fprintf(stderr, "Unsuported HTTP method: %s\n", method);
         close(client_fd);
         free(arg);
         free(buffer);
@@ -113,7 +95,7 @@ void *handle_client(void *arg) {
     char *file_name = strtok(NULL, " ");
     if (!file_name) {
         perror("Malformed HTTP request: missing file name");
-        send_error_message(client_fd);
+        file_not_found_error(client_fd);
         close(client_fd);
         free(arg);
         free(buffer);
@@ -128,7 +110,7 @@ void *handle_client(void *arg) {
         if (snprintf(file_path, sizeof(file_path), "./www%s", file_name) >=
             sizeof(file_path)) {
             fprintf(stderr, "File path too long\n");
-            send_error_message(client_fd);
+            file_not_found_error(client_fd);
             close(client_fd);
             free(arg);
             free(buffer);
@@ -139,7 +121,7 @@ void *handle_client(void *arg) {
     if (access(file_path, F_OK) == 0) {
         send_file(client_fd, file_path);
     } else {
-        send_error_message(client_fd);
+        file_not_found_error(client_fd);
     }
 
     close(client_fd);
@@ -148,11 +130,17 @@ void *handle_client(void *arg) {
     return NULL;
 }
 
+void handle_signal(int signal){
+    printf("Shutting down server...\n");
+    close(server_fd);
+    exit(0);
+}
+
 void send_file(int client_fd, char *file_path){
     FILE *file = fopen(file_path, "r");
     if (file == NULL) {
         perror("Failed to open file");
-        send_error_message(client_fd);
+        file_not_found_error(client_fd);
         return;
     }
 
@@ -170,9 +158,8 @@ void send_file(int client_fd, char *file_path){
         response_header = "HTTP/1.1 200 OK\r\n"
             "Content-Type: application/javascript\r\n"
             "\r\n";
-
     } else {
-        send_error_message(client_fd);
+        unsupported_media_error(client_fd);
         fclose(file);
         return;
     }
@@ -188,8 +175,17 @@ void send_file(int client_fd, char *file_path){
 }
 
 
+void unsupported_media_error(int client_fd) {
+    char *response_header = "HTTP/1.1 415 Unsupported Media Type\r\n"
+                            "Content-Type: text/html\r\n"
+                            "\r\n";
+    char *error_body = "<html><body><h1>415 Unsupported Media Type</h1></body></html>";
 
-void send_error_message(int client_fd) {
+    send(client_fd, response_header, strlen(response_header), 0);
+    send(client_fd, error_body, strlen(error_body), 0);
+}
+
+void file_not_found_error(int client_fd) {
     char *response_header = "HTTP/1.1 404 Not Found\r\n"
                             "Content-Type: text/html\r\n"
                             "\r\n";
