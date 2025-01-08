@@ -4,9 +4,10 @@
 
 int server_fd;
 
-// TODO: add compression (gzip/brotli)
 // TODO: add caching
+// TODO: add compression (gzip/brotli)
 // TODO: support partial content delevery (206 parial content)
+// TODO: use HTTPS
 
 int main() {
     struct sockaddr_in server_addr;
