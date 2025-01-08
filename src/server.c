@@ -4,6 +4,10 @@
 
 int server_fd;
 
+// TODO: add compression (gzip/brotli)
+// TODO: add caching
+// TODO: support partial content delevery (206 parial content)
+
 int main() {
     struct sockaddr_in server_addr;
 
@@ -102,7 +106,6 @@ void *handle_client(void *arg) {
         return NULL;
     }
 
-    // Check if you have to send html/css/js
     char file_path[BUFFER_SIZE];
     if (strcmp(file_name, "/") == 0) {
         snprintf(file_path, sizeof(file_path), "./www/index.html");
