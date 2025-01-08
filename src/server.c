@@ -156,6 +156,7 @@ void send_file(int client_fd, char *file_path){
         return;
     }
 
+    // Create and send response headers
     char *response_header;
     if (ends_with(file_path, ".html")){
         response_header = "HTTP/1.1 200 OK\r\n"
@@ -165,15 +166,23 @@ void send_file(int client_fd, char *file_path){
         response_header = "HTTP/1.1 200 OK\r\n"
             "Content-Type: text/css\r\n"
             "\r\n";
+    } else if (ends_with(file_path, ".js")){
+        response_header = "HTTP/1.1 200 OK\r\n"
+            "Content-Type: application/javascript\r\n"
+            "\r\n";
+
     } else {
         send_error_message(client_fd);
+        fclose(file);
         return;
     }
 
+    // Send file contents
     send(client_fd, response_header, strlen(response_header), 0);
     char file_buffer[BUFFER_SIZE];
-    while (fgets(file_buffer, sizeof(file_buffer), file)) {
-        send(client_fd, file_buffer, strlen(file_buffer), 0);
+    size_t bytes_read;
+    while ((bytes_read = fread(file_buffer,1 ,sizeof(file_buffer), file)) > 0) {
+        send(client_fd, file_buffer, bytes_read, 0);
     }
     fclose(file);
 }
