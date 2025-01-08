@@ -1,4 +1,5 @@
 #include <arpa/inet.h>
+#include <stdbool.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <regex.h>
@@ -14,8 +15,12 @@
 #define BUFFER_SIZE 1024
 
 void *handle_client(void *arg);
+bool ends_with(char *main_str, char *ending);
 void send_error_message(int client_fd);
-void send_content(int client_fd, char *file_path);
+void send_file(int client_fd, char *file_path);
+void send_html(int client_fd, char *file_path, FILE *file);
+void send_css(int client_fd, char *file_path);
+void send_js(int client_fd, char *file_path);
 
 int main() {
     int server_fd;
@@ -33,8 +38,7 @@ int main() {
     server_addr.sin_port = htons(PORT);
 
     // Bind socket to port
-    if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) <
-        0) {
+    if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         perror("bind failed");
         exit(1);
     }
@@ -55,16 +59,14 @@ int main() {
             continue;
         }
 
-        if ((*client_fd = accept(server_fd, (struct sockaddr *)&client_addr,
-                                 &client_addr_len)) < 0) {
+        if ((*client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len)) < 0) {
             perror("accept failed");
             free(client_fd);
             continue;
         }
 
         pthread_t thread_id;
-        if (pthread_create(&thread_id, NULL, handle_client,
-                           (void *)client_fd) != 0) {
+        if (pthread_create(&thread_id, NULL, handle_client, (void *)client_fd) != 0) {
             perror("pthread_create failed");
             close(*client_fd);
             free(client_fd);
@@ -99,8 +101,8 @@ void *handle_client(void *arg) {
 
     printf("request:\n%s", buffer);
 
-    char *request = strtok(buffer, " ");
-    if (strcmp(request, "GET") != 0) {
+    char *method = strtok(buffer, " ");
+    if (strcmp(method, "GET") != 0) {
         perror("Must have a GET request");
         close(client_fd);
         free(arg);
@@ -118,6 +120,7 @@ void *handle_client(void *arg) {
         return NULL;
     }
 
+    // Check if you have to send html/css/js
     char file_path[BUFFER_SIZE];
     if (strcmp(file_name, "/") == 0) {
         snprintf(file_path, sizeof(file_path), "./www/index.html");
@@ -134,7 +137,7 @@ void *handle_client(void *arg) {
     }
 
     if (access(file_path, F_OK) == 0) {
-        send_content(client_fd, file_path);
+        send_file(client_fd, file_path);
     } else {
         send_error_message(client_fd);
     }
@@ -145,7 +148,7 @@ void *handle_client(void *arg) {
     return NULL;
 }
 
-void send_content(int client_fd, char *file_path) {
+void send_file(int client_fd, char *file_path){
     FILE *file = fopen(file_path, "r");
     if (file == NULL) {
         perror("Failed to open file");
@@ -153,19 +156,29 @@ void send_content(int client_fd, char *file_path) {
         return;
     }
 
-    char *response_header = "HTTP/1.1 200 OK\r\n"
-                            "Content-Type: text/html\r\n"
-                            "\r\n";
+    char *response_header;
+    if (ends_with(file_path, ".html")){
+        response_header = "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/html\r\n"
+            "\r\n";
+    } else if (ends_with(file_path, ".css")){
+        response_header = "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/css\r\n"
+            "\r\n";
+    } else {
+        send_error_message(client_fd);
+        return;
+    }
 
     send(client_fd, response_header, strlen(response_header), 0);
-
     char file_buffer[BUFFER_SIZE];
     while (fgets(file_buffer, sizeof(file_buffer), file)) {
         send(client_fd, file_buffer, strlen(file_buffer), 0);
     }
-
     fclose(file);
 }
+
+
 
 void send_error_message(int client_fd) {
     char *response_header = "HTTP/1.1 404 Not Found\r\n"
@@ -175,4 +188,15 @@ void send_error_message(int client_fd) {
 
     send(client_fd, response_header, strlen(response_header), 0);
     send(client_fd, error_body, strlen(error_body), 0);
+}
+
+bool ends_with(char *main_str, char *ending){
+    size_t main_len = strlen(main_str);
+    size_t ending_len = strlen(ending);
+
+    if (main_len < ending_len) {
+        return false;
+    }
+
+    return strcmp(main_str + main_len - ending_len, ending) == 0;
 }
