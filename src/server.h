@@ -14,8 +14,9 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#define PORT 8080
+#define SERVER_PORT 8080
 #define BUFFER_SIZE 1024
+#define SERVER_IP "127.0.0.1"
 
 bool ends_with(const char *main_str, char *ending);
 const char *get_mime_type(const char* file_path);
