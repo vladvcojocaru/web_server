@@ -1,6 +1,7 @@
 #include "server.h"
 #include <signal.h>
 #include <stdio.h>
+#include <string.h>
 
 int server_fd;
 
@@ -70,33 +71,35 @@ int main() {
 
 void *handle_client(void *arg) {
 	int client_fd = *((int *)arg);
-	char *buffer = (char *)malloc(BUFFER_SIZE);
+	char *request = (char *)malloc(BUFFER_SIZE);
 
 	// receive request data from client and store into buffer
-	ssize_t bytes_received = recv(client_fd, buffer, BUFFER_SIZE, 0);
+	ssize_t bytes_received = recv(client_fd, request, BUFFER_SIZE, 0);
 
 	if (bytes_received == 0) {
 		printf("client disconnected...\n");
 		close(client_fd);
 		free(arg);
-		free(buffer);
+		free(request);
 		return NULL;
 	} else if (bytes_received < 0) {
 		perror("Failed to receive client request");
 		close(client_fd);
 		free(arg);
-		free(buffer);
+		free(request);
 		return NULL;
 	}
 
-	printf("request:\n%s", buffer);
+	printf("request:\n%s", request);
 
-	char *method = strtok(buffer, " ");
+	char **headers = parse_headers(request);
+
+	char *method = strtok(request, " ");
 	if (strcmp(method, "GET") != 0) {
 		fprintf(stderr, "Unsuported HTTP method: %s\n", method);
 		close(client_fd);
 		free(arg);
-		free(buffer);
+		free(request);
 		return NULL;
 	}
 
@@ -106,7 +109,7 @@ void *handle_client(void *arg) {
 		file_not_found_error(client_fd);
 		close(client_fd);
 		free(arg);
-		free(buffer);
+		free(request);
 		return NULL;
 	}
 
@@ -120,7 +123,7 @@ void *handle_client(void *arg) {
 			file_not_found_error(client_fd);
 			close(client_fd);
 			free(arg);
-			free(buffer);
+			free(request);
 			return NULL;
 		}
 	}
@@ -133,7 +136,7 @@ void *handle_client(void *arg) {
 
 	close(client_fd);
 	free(arg);
-	free(buffer);
+	free(request);
 	return NULL;
 }
 
@@ -218,4 +221,47 @@ bool ends_with(const char *main_str, char *ending) {
 	}
 
 	return strcmp(main_str + main_len - ending_len, ending) == 0;
+}
+
+char **parse_headers(const char *buffer) {
+	// Dynamic memory allocation
+	char **tokens = malloc(MAX_TOKENS * sizeof(char));
+	if (!tokens) {
+		perror("Failed to allocate memory");
+		return NULL;
+	}
+
+	// Make copy of the buffer to safely tokenize
+	char *buffer_copy = strdup(buffer);
+	if (!buffer_copy) {
+		perror("Failed to duplicate buffer");
+		free(tokens);
+		return NULL;
+	}
+
+	int token_count = 0;
+	char *token = strtok(buffer_copy, "\n");
+
+	while (token != NULL && token_count != MAX_TOKENS) {
+		// Allocate memory for each token
+		tokens[token_count] = strdup(token);
+		if (!tokens[token_count]) {
+			perror("Failed to allocate memory for token");
+
+			// Clean up allocated memory before exiting
+			for (int i = 0; i < token_count; i++) {
+				free(tokens[i]);
+			}
+			free(tokens);
+			free(buffer_copy);
+			return NULL;
+		}
+		token_count++;
+		token = strtok(NULL, "\n");
+	}
+
+	tokens[token_count] = NULL; // Null-terminate the array
+	free(buffer_copy);
+
+	return tokens;
 }

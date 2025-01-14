@@ -16,10 +16,11 @@
 
 #define SERVER_PORT 8080
 #define BUFFER_SIZE 1024
+#define MAX_TOKENS 8080
 #define SERVER_IP "127.0.0.1"
 
 bool ends_with(const char *main_str, char *ending);
-const char *get_mime_type(const char* file_path);
+const char *get_mime_type(const char *file_path);
 void *handle_client(void *arg);
 void file_not_found_error(int client_fd);
 void send_file(int client_fd, char *file_path);
@@ -28,3 +29,4 @@ void send_css(int client_fd, char *file_path);
 void send_js(int client_fd, char *file_path);
 void unsupported_media_error(int client_fd);
 void handle_signal(int signal);
+char **parse_headers(const char *buffer);
