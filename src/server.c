@@ -1,11 +1,10 @@
-#include "server.h"
-#include <signal.h>
+#include "headers.h"
 #include <stdio.h>
-#include <string.h>
+#include <zconf.h>
+#include <zlib.h>
 
 int server_fd;
 
-// TODO: add compression (gzip/brotli)
 // TODO: add caching
 // TODO: support partial content delevery (206 parial content)
 // TODO: use HTTPS
@@ -17,6 +16,13 @@ int main() {
 	if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
 		perror("socket failes");
 		exit(1);
+	}
+
+	// For faster testing
+	int opt = 1;
+	if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
+		perror("setsockopt");
+		exit(EXIT_FAILURE);
 	}
 	signal(SIGINT, handle_signal);
 
@@ -90,16 +96,21 @@ void *handle_client(void *arg) {
 		return NULL;
 	}
 
-	printf("request:\n%s", request);
-
 	char **headers = parse_headers(request);
+	free(request);
 
-	char *method = strtok(request, " ");
+	if (headers) {
+		for (int i = 0; headers[i]; i++) {
+			printf("Header[%d]: %s\n", i, headers[i]);
+		}
+	}
+
+	char *method = strtok(headers[0], " ");
 	if (strcmp(method, "GET") != 0) {
 		fprintf(stderr, "Unsuported HTTP method: %s\n", method);
 		close(client_fd);
 		free(arg);
-		free(request);
+		free(headers);
 		return NULL;
 	}
 
@@ -109,7 +120,7 @@ void *handle_client(void *arg) {
 		file_not_found_error(client_fd);
 		close(client_fd);
 		free(arg);
-		free(request);
+		free(headers);
 		return NULL;
 	}
 
@@ -123,20 +134,20 @@ void *handle_client(void *arg) {
 			file_not_found_error(client_fd);
 			close(client_fd);
 			free(arg);
-			free(request);
+			free(headers);
 			return NULL;
 		}
 	}
 
 	if (access(file_path, F_OK) == 0) {
-		send_file(client_fd, file_path);
+		send_file(client_fd, file_path, headers);
 	} else {
 		file_not_found_error(client_fd);
 	}
 
 	close(client_fd);
 	free(arg);
-	free(request);
+	free(headers);
 	return NULL;
 }
 
@@ -146,7 +157,7 @@ void handle_signal(int signal) {
 	exit(0);
 }
 
-void send_file(int client_fd, char *file_path) {
+void send_file(int client_fd, char *file_path, char **headers) {
 	FILE *file = fopen(file_path, "r");
 	if (file == NULL) {
 		perror("Failed to open file");
@@ -155,20 +166,104 @@ void send_file(int client_fd, char *file_path) {
 	}
 
 	char response_header[BUFFER_SIZE];
+
+	int index;
+	char *algorithms;
+
+	// Include Accept-Encoding
+	if ((index = search_header(headers, "Accept-Encoding")) != -1) {
+		printf("original header: %s\n", headers[index]);
+
+		// I could have used char: *header_copy = strdup(headers[index]);
+		char *header_copy = (char *)malloc(strlen(headers[index]) + 1);
+		if (!header_copy) {
+			perror("Failed to allocate memory");
+			exit(1);
+		}
+		strncpy(header_copy, headers[index], strlen(headers[index]) + 1);
+		printf("header copy: %s\n", header_copy);
+
+		// Tokenize the copied header
+		char *key = strtok(header_copy, ": ");
+		algorithms = strtok(NULL, "");
+		printf("key: %s\nalgorithms: %s\n", key, algorithms);
+		printf("tokenize finished\n");
+	}
+
+	// Format response header
 	snprintf(response_header, sizeof(response_header),
 	         "HTTP/1.1 200 OK\r\n"
 	         "Content-Type: %s\r\n"
+	         "%s\r\n"
 	         "\r\n",
-	         get_mime_type(file_path));
+	         get_mime_type(file_path),
+	         (algorithms && strstr(algorithms, "gzip"))
+	             ? "Content-Encoding: gzip"
+	             : "");
 
-	// Send file contents
+	printf("created response header:\n%s\n", response_header);
 	send(client_fd, response_header, strlen(response_header), 0);
 	char file_buffer[BUFFER_SIZE];
 	size_t bytes_read;
-	while ((bytes_read = fread(file_buffer, 1, sizeof(file_buffer), file)) >
-	       0) {
-		send(client_fd, file_buffer, bytes_read, 0);
+
+	// Send file contents
+	if (!strstr(algorithms, "gzip")) {
+		while ((bytes_read = fread(file_buffer, 1, sizeof(file_buffer), file)) >
+		       0) {
+			send(client_fd, file_buffer, bytes_read, 0);
+		}
+		// Compress the data and send it
+	} else {
+		char compressed_buffer[BUFFER_SIZE * 2];
+		z_stream stream = {
+		    0}; // z_stream holds the state of the compression process
+
+		// Initialize zlib compression
+		// zalloc, zfree, opaque are used for memory allocation
+		// Setting these on Z_NULL uses the default allocator
+		stream.zalloc = Z_NULL;
+		stream.zfree = Z_NULL;
+		stream.opaque = Z_NULL;
+
+		// Initialize z_stream to gzip compression
+		if (deflateInit2(&stream, Z_BEST_COMPRESSION, Z_DEFLATED,
+		                 16 + MAX_WBITS, 8, Z_DEFAULT_STRATEGY) != Z_OK) {
+			perror("Failed to initialize gzip compression");
+			fclose(file);
+			return;
+		}
+
+		while ((bytes_read = fread(file_buffer, 1, sizeof(file_buffer), file)) >
+		       0) {
+			stream.next_in = (Bytef *)file_buffer;
+			stream.avail_in = bytes_read;
+
+			do {
+				stream.next_out = (Bytef *)compressed_buffer;
+				stream.avail_out = sizeof(compressed_buffer);
+
+				deflate(&stream, Z_SYNC_FLUSH);
+
+				size_t compressed_size =
+				    sizeof(compressed_buffer) - stream.avail_out;
+				send(client_fd, compressed_buffer, compressed_size, 0);
+			} while (stream.avail_out == 0);
+		}
+
+		do {
+			stream.next_out = (Bytef *)compressed_buffer;
+			stream.avail_out = sizeof(compressed_buffer);
+
+			deflate(&stream, Z_SYNC_FLUSH);
+
+			size_t compressed_size =
+			    sizeof(compressed_buffer) - stream.avail_out;
+			send(client_fd, compressed_buffer, compressed_size, 0);
+		} while (stream.avail_out == 0);
+
+		deflateEnd(&stream);
 	}
+
 	fclose(file);
 }
 
@@ -239,6 +334,7 @@ char **parse_headers(const char *buffer) {
 		return NULL;
 	}
 
+	// TODO: Trim white spaces from each header
 	int token_count = 0;
 	char *token = strtok(buffer_copy, "\n");
 
@@ -264,4 +360,39 @@ char **parse_headers(const char *buffer) {
 	free(buffer_copy);
 
 	return tokens;
+}
+
+// Search for heading <header>, if it is found the function returns
+// the <header> index if it is not it returns -1
+int search_header(char **headers, const char *searched_header) {
+
+	for (int i = 0; headers[i]; i++) {
+		if (strncmp(headers[i], searched_header, strlen(searched_header)) ==
+		    0) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+char *trim_whitespace(char *str) {
+	char *end;
+
+	// Trim leading spaces
+	while (isspace((unsigned char)*str))
+		str++;
+
+	// If is all spaces return an empty string
+	if (*str == 0)
+		return str;
+
+	// Trim trailing spaces""
+	end = str + strlen(str) - 1;
+	while (end > str && isspace((unsigned char)*end))
+		end--;
+
+	// Null-terminate the string
+	*(end + 1) = '\0';
+
+	return str;
 }
