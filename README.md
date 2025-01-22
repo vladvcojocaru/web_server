@@ -16,7 +16,7 @@ This project is a fully custom-built HTTP server implemented from scratch in C.
     - text/html for `.html` files
     - text/css for `.css` files
     - applications/javascript for `.js` files
-### 4. Multithreading
+### 4. Compression
 - Response compression support (only gzip) to reduce payload sizes.
 ## Planned Features
 - Caching for optimized performance.
